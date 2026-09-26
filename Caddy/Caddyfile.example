@@ -1,0 +1,53 @@
+(auth_gate_worker) {
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth?authelia_url=https://auth.[cloudflare worker user].workers.dev
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        header_up X-Forwarded-Host {header.X-Forwarded-Host}
+    }
+}
+
+(auth_gate_direct) {
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth?authelia_url=https://auth.[your main domain]
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        header_up X-Forwarded-Host {host}
+    }
+}
+auth.[your main domain] {
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+    handle /api/oidc/token {
+        reverse_proxy authelia:9091 {
+            header_up X-Forwarded-Host "auth.[cloudflare worker user].workers.dev"
+        }
+    }
+    # This handles traffic from the Cloudflare Worker
+    @from_worker header X-Forwarded-Host *[cloudflare worker user].workers.dev
+    handle @from_worker {
+        reverse_proxy authelia:9091 {
+            header_up X-Forwarded-Host "auth.[cloudflare worker user].workers.dev"
+        }
+    }
+    # Direct access via your main domain
+    handle {
+        reverse_proxy authelia:9091
+    }
+}
+exampleservice.example.com {
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+    # Optional:
+    # If you need API access this bypasses your chosen auth gate for API requests
+    handle /api/* {
+        reverse_proxy 192.168.2.194:8989
+    }
+    #This handles traffic from the Cloudflare Worker
+    @from_worker header X-Worker-Proxy "true"
+    handle @from_worker {
+        import auth_gate_worker
+        reverse_proxy 192.168.2.194:8989
+    }
+    # This handles access via your main domain
+    handle {
+        import auth_gate_direct
+        reverse_proxy 192.168.2.194:8989
+    }
+}

@@ -1,0 +1,1 @@
+There was no special setup for LLDAP, however I did create a bind user that services can use to read from the user database and an authelia group to easily manage access.
